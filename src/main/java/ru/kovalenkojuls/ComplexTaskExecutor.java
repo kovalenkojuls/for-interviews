@@ -10,12 +10,15 @@ public class ComplexTaskExecutor {
     private static final Logger logger = LoggerFactory.getLogger(ComplexTaskExecutor.class);
     private final CyclicBarrier barrier;
     private final ExecutorService executor;
-    private final AtomicInteger sum;
+    private final AtomicInteger totalResult;
 
     ComplexTaskExecutor(int numThreads) {
-        barrier = new CyclicBarrier(numThreads + 1);
+        totalResult = new AtomicInteger(0);
+        barrier = new CyclicBarrier(numThreads, () -> {
+            logger.info("{}: Total result: {}", Thread.currentThread().getName(), totalResult.get());
+            totalResult.set(0);
+        });
         executor = Executors.newFixedThreadPool(numThreads);
-        sum = new AtomicInteger(0);
     }
 
     public synchronized void executeTasks(int numberOfTasks) {
@@ -26,7 +29,7 @@ public class ComplexTaskExecutor {
                 ComplexTask task = new ComplexTask();
                 int result = task.execute();
                 logger.info("{}: task {} finished. Result: {}", Thread.currentThread().getName(), taskNumber, result);
-                sum.addAndGet(result);
+                totalResult.addAndGet(result);
                 try {
                     barrier.await();
                 } catch (InterruptedException | BrokenBarrierException e) {
@@ -35,18 +38,16 @@ public class ComplexTaskExecutor {
                 }
             });
         }
-
-        try {
-            barrier.await();
-        } catch (InterruptedException | BrokenBarrierException e) {
-            throw new RuntimeException(e);
-        }
-
-        logger.info("{}: Total result: {}", Thread.currentThread().getName(), sum.get());
-        sum.set(0);
     }
 
     public void shutdown() {
         executor.shutdown();
+        try {
+            if (!executor.awaitTermination(3, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+        }
     }
 }
